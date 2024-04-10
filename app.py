@@ -1,136 +1,212 @@
-import time
 from ast import literal_eval
 from io import BytesIO
 
 import streamlit as st
 import torch
 from database import DatabaseManager
-from diffusers import StableDiffusionPipeline, StableDiffusionXLPipeline, DPMSolverMultistepScheduler
+import requests
+from PIL import Image
 
-
-st.set_page_config(layout="wide") 
+st.set_page_config(layout="wide")
 db_manager = DatabaseManager()
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-def generate_image(model_name, model_kwargs):
-    t0 = time.time()
-    if model_name == "Stable Diffusion":    # like shit
-        pipe = StableDiffusionPipeline.from_pretrained("stabilityai/stable-diffusion-2-1", torch_dtype=torch.float16).to(device)
-        pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config)
-    if model_name == "SDXL":                # better
-        pipe = StableDiffusionXLPipeline.from_pretrained("stabilityai/stable-diffusion-xl-base-1.0", torch_dtype=torch.float16, use_safetensors=True, variant="fp16", use_karras_sigmas=True, euler_at_final=True).to(device)
-        pipe.enable_xformers_memory_efficient_attention()
-    image = pipe(**model_kwargs).images[0]
-    print("Taken:", time.time()-t0)
-    return image
+DEFAULT_PROMPT = "(1girl:2),(beautiful eyes:1.2),beautiful girl,(hands in pocket:2),red hat,hoodie,computer"
+DEFAULT_NEGATIVE_PROMPT = "(bad hands:5),(fused fingers:5),(bad arms:4),(deformities:1.3),(extra limbs:2),(extra arms:2),(disfigured:2)"
 
 
 def login():
-    st.title('Login')
-    username = st.text_input('Username')
-    password = st.text_input('Password', type='password')
-    if st.button('Login'):
+    st.title("Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    if st.button("Login"):
         authenticated, user_id, username = db_manager.authenticate(username, password)
         if authenticated:
             st.session_state.logged_in = True
             st.session_state.user_id = user_id
             st.session_state.username = username
+            st.query_params.logged_in = True
+            st.query_params.user_id = user_id
+            st.query_params.username = username
             st.rerun()
-            return True
         else:
-            st.error('Invalid username or password. Please try again.')
+            st.error("Invalid username or password. Please try again.")
     return False
 
 
 def create_account_page():
-    st.title('Create Account')
-    new_username = st.text_input('New Username')
-    new_password = st.text_input('New Password', type='password')
-    if st.button('Create Account'):
+    st.title("Create Account")
+    new_username = st.text_input("New Username")
+    new_password = st.text_input("New Password", type="password")
+    if st.button("Create Account"):
         if new_username.strip() and new_password.strip():
-            db_manager.create_account(new_username, new_password)
-            st.success('Account created successfully!')
-            st.write('You can now login with your new account.')
+            error = db_manager.create_account(new_username, new_password)
+            if error:
+                st.error(error)
+                return
+            st.success("Account created successfully!")
+            st.write("You can now login with your new account.")
         else:
-            st.error('Username and password cannot be empty.')
+            st.error("Username and password cannot be empty.")
 
 
 def profile_page():
-    user_id = st.session_state.user_id
-    user_images = db_manager.get_user_images(user_id)
-    st.header(f"{st.session_state.username} Profile")
+    all_users = db_manager.get_users()
+    user_names = [u[1] for u in all_users]
+    user_id_map = {u[1]: u[0] for u in all_users}
+
+    current_user_index = user_names.index(st.session_state.username)
+
+    selected_user = st.selectbox("Select Profile", user_names, index=current_user_index)
+    selected_user_id = user_id_map[selected_user]
+
+    user_images = db_manager.get_user_images(selected_user_id)
+    is_owner = st.session_state.user_id == selected_user_id
+
+    st.header(f"{'Your' if is_owner else selected_user} Profile")
 
     if len(user_images) == 0:
-        st.write("Welcome new user, you don't have any generated images. Please go cook your new waifu~")
-    else:
-        num_columns = 5
-        images_to_delete = []
-        images_per_row = len(user_images) // num_columns + 1
-        for i in range(images_per_row):
-            col = st.columns(num_columns)
-            for j in range(num_columns):
-                index = i * num_columns + j
-                if index < len(user_images):
-                    image = user_images[index]
-                    delete_checkbox = col[j].checkbox(f"Delete Image {image[0]}", key=f"delete_{image[0]}")
+        st.write("This user doesn't have any generated images.")
+        return
+
+    num_columns = 5
+    images_to_delete = []
+    images_per_row = len(user_images) // num_columns + 1
+    for i in range(images_per_row):
+        col = st.columns(num_columns)
+        for j in range(num_columns):
+            index = i * num_columns + j
+            if index < len(user_images):
+                image = user_images[index]
+                if is_owner:
+                    delete_checkbox = col[j].checkbox(
+                        f"Delete Image {image[0]}", key=f"delete_{image[0]}"
+                    )
                     if delete_checkbox:
                         images_to_delete.append(image[0])
-                    col[j].image(image[-1], caption=f"Model: {image[2]}, Prompt: {literal_eval(image[3])['prompt']}")
+                col[j].image(
+                    image[-1],
+                    caption=f"Model: {image[2]}, Prompt: {literal_eval(image[3])['prompt']}",
+                )
 
-        if st.button("Delete Images"):
-            if images_to_delete:
-                db_manager.delete_images(images_to_delete)
-                st.experimental_rerun()
+    if st.button("Delete Images") and images_to_delete:
+        db_manager.delete_images(images_to_delete)
+        st.experimental_rerun()
+
+
+def query_inference_endpoint(**kwargs):
+    url = "http://localhost:5000/inference"
+    payload = {
+        "prompt": kwargs.get("prompt"),
+        "negative_prompt": kwargs.get("negative_prompt"),
+        "batch_size": kwargs.get("batch_size"),
+        "width": kwargs.get("width"),
+        "height": kwargs.get("height"),
+        "seed": kwargs.get("seed"),
+        "mode": kwargs.get("mode"),
+    }
+    headers = {"Content-Type": "application/json"}
+
+    response = requests.post(url, json=payload, headers=headers)
+
+    if response.status_code == 200:
+        image_bytes_stream = response.content
+        delimiter = b"--DELIMITER--"
+        image_bytes_list = image_bytes_stream.split(delimiter)
+        images = []
+        for image_bytes in image_bytes_list:
+            if image_bytes:
+                image = Image.open(BytesIO(image_bytes))
+                images.append(image)
+        return images
+    else:
+        st.error(f"Error: {response.status_code}")
+        return None
 
 
 def generate_page():
-    st.subheader('Generate and Save Image 👨‍🎨')
-    model_name = st.selectbox('Model', ['Stable Diffusion', 'SDXL'])
+    st.subheader("Generate and Save Image 👨‍🎨")
     model_kwargs = {
-        "prompt": st.text_input('Prompt', placeholder="An astronaut riding a rainbow unicorn, cinematic, dramatic")
+        "mode": st.selectbox("Mode", ["anime", "cartoon", "realistic"]),
+        "prompt": st.text_input(
+            "Prompt",
+            placeholder=DEFAULT_PROMPT,
+            value=DEFAULT_PROMPT,
+            help="Your desired features for the generated images",
+        ),
     }
 
     with st.expander("Refine your output"):
-        model_kwargs["negative_prompt"] = st.text_input('Negative Prompt', placeholder="the absolute worst quality, distorted features",
-                                                        help="Basically type what you don't want to see in the generated image")
-        col1, col2 = st.columns(2)
+        model_kwargs["negative_prompt"] = st.text_input(
+            "Negative Prompt",
+            placeholder=DEFAULT_NEGATIVE_PROMPT,
+            help="Features you want to exclude from the image",
+        )
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
-            model_kwargs['width'] = st.number_input("Width of output image", value=1024)
+            model_kwargs["width"] = st.number_input(label="Width", value=1024)
         with col2:
-            model_kwargs['height'] = st.number_input("Height of output image", value=1024)
-        col1, col2 = st.columns(2)
-        with col1:
-            model_kwargs['num_inference_steps'] = st.slider("Number of denoising steps", value=20, min_value=1, max_value=100, step=1,
-                                                            help="More steps result in higher quality but also require more time to generate.")
-        with col2:
-            model_kwargs['guidance_scale'] = st.slider("Guidance scale", value=7.5, min_value=1.0, max_value=20.0, step=0.1,
-                                                            help="Determines how similar the image will be to the prompt. Note that higher value results in less 'creative' image.")
+            model_kwargs["height"] = st.number_input(label="Height", value=1024)
+        with col3:
+            model_kwargs["batch_size"] = st.number_input(
+                label="Batch Size", value=3, min_value=1, max_value=9
+            )
+        with col4:
+            model_kwargs["seed"] = st.number_input(label="Seed", value=69420)
 
-    if st.button('Generate and Save'):
-        if model_kwargs["prompt"]:
-            with st.spinner("Generating image..."):
-                generated_image = generate_image(model_name, model_kwargs)
-            st.success('Done!')
-            if generated_image:
-                st.image(generated_image, caption='Generated Image',
-                        use_column_width=True)
-                filename = f"{st.session_state.username}_generated_image.png"
-                generated_image.save(filename)
-                st.success(f"Image saved as {filename}")
+    if st.button("Generate images"):
+        with st.spinner("Generating image..."):
+            output_images = query_inference_endpoint(**model_kwargs)
+        if not output_images:
+            return
+        st.success("Done!")
+
+        num_images = len(output_images)
+        num_cols = min(num_images, 3)
+        cols = st.columns(num_cols)
+
+        # TODO: improve images layout based on width and height settings
+        max_width = int(model_kwargs["width"])
+        for i, image in enumerate(output_images):
+            with cols[i % num_cols]:
+                st.image(
+                    image,
+                    width=max_width,
+                    caption=f"Image {i+1}",
+                    use_column_width=True,
+                )
                 img_data = BytesIO()
-                generated_image.save(img_data, format='PNG')
+                image.save(img_data, format="PNG")
                 img_data.seek(0)
-                db_manager.insert_image(st.session_state.user_id, model_name, model_kwargs, img_data.read())
-        else:
-            st.warning("Please enter a prompt.")
+                db_manager.insert_image(
+                    st.session_state.user_id,
+                    f"{model_kwargs['mode']}",
+                    model_kwargs,
+                    img_data.read(),
+                )
+
 
 def main():
-    if 'logged_in' not in st.session_state:
-        st.session_state.logged_in = False
+    query_params = st.query_params
+    logged_in = query_params.get("logged_in", False)
+    user_id = query_params.get("user_id", None)
+    username = query_params.get("username", None)
+
+    st.session_state.logged_in = False
+    if logged_in and user_id and username:
+        st.session_state.logged_in = True
+        st.session_state.user_id = int(user_id)
+        st.session_state.username = username
 
     if st.session_state.logged_in:
-        st.sidebar.write(f'Welcome, {st.session_state.username}! ✨')
-        page = st.sidebar.radio("What would you like to do today?", ["View Profile", "Generate Image"])
+        st.sidebar.write(f"Welcome, {st.session_state.username}! ✨")
+        page = st.sidebar.radio(
+            "What would you like to do today?", ["Generate Image", "View Profile"]
+        )
+        if st.sidebar.button("Logout"):
+            st.session_state.clear()
+            st.query_params.clear()
+            st.rerun()
         if page == "View Profile":
             profile_page()
         else:
@@ -143,5 +219,5 @@ def main():
             create_account_page()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

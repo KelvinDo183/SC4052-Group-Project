@@ -24,7 +24,7 @@ async def inference(request: Request):
 
     # NOTE: list of numpy tensors
     output_images = cached_generate_image(
-        mode, prompt, negative_prompt, batch_size, width, height, seed
+        prompt, negative_prompt, mode, batch_size, width, height, seed
     )
 
     # Convert the images to bytes and join them with a delimiter

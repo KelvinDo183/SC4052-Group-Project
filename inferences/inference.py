@@ -1,7 +1,6 @@
 from typing import Literal, Sequence, Mapping, Any, Union
 import torch
 from functools import lru_cache
-import logging
 
 from nodes import (
     VAEEncode,
@@ -59,9 +58,7 @@ def load_refiner():
 
 @lru_cache(maxsize=1)
 def load_base_model(mode):
-    # ckpt_name=base_checkpoints[mode]
-    # print(ckpt_name)
-    ckpt_name=base_checkpoints['anime']
+    ckpt_name = base_checkpoints[mode]
     return checkpointloadersimple.load_checkpoint(ckpt_name=ckpt_name)
 
 
@@ -75,19 +72,14 @@ def load_lora_model(base_model):
         clip=get_value_at_index(base_model, 1),
     )
 
-
-# SDXL_Refiner_v10 = checkpointloadersimple.load_checkpoint(
-#     ckpt_name="sdXL_v10RefinerVAEFix.safetensors"
-# )
-
-DEFAULT_PROMPT = "(1girl:2,masterpiece,beautiful eyes:1.2,beautiful body:0.6,slender body),floral dress,no hands"
-DEFAULT_NEGATIVE_PROMPT = "(bad hands:5,bad arms:4,deformities:1.3),(extra limbs:2,extra arms:2,fused fingers:5,out of focus:3.0, deformed:2, disfigured:2),badpic,bad anatomy,"
+DEFAULT_PROMPT = "(1girl:2),(beautiful eyes:1.2),beautiful girl,(hands in pocket:2),red hat,hoodie,computer"
+DEFAULT_NEGATIVE_PROMPT = "(bad hands:5),(fused fingers:5),(bad arms:4),(deformities:1.3),(extra limbs:2),(extra arms:2),(disfigured:2)"
 
 
 def generate_image(
-    mode: Union[Literal["anime"], Literal["realistic"], Literal["cartoon"]] = "anime",
-    prompt=DEFAULT_PROMPT,
+    prompt,
     negative_prompt=DEFAULT_NEGATIVE_PROMPT,
+    mode: Union[Literal["anime"], Literal["realistic"], Literal["cartoon"]] = "anime",
     batch_size=4,
     width=1024,
     height=1024,
@@ -95,7 +87,6 @@ def generate_image(
 ):
     with torch.inference_mode():
         SDXL_BaseModel = load_base_model(mode)
-        SDXL_Lightning_Lora = load_lora_model(SDXL_BaseModel)
 
         emptylatentimage = EmptyLatentImage()
         emptylatentimage_5 = emptylatentimage.generate(
@@ -103,15 +94,30 @@ def generate_image(
         )
 
         cliptextencode = CLIPTextEncode()
-        cliptextencode_22 = cliptextencode.encode(
-            text=prompt,
-            clip=get_value_at_index(SDXL_Lightning_Lora, 1),
-        )
+        with_lightning_lora = mode != 'realistic'
+        SDXL_Lightning_Lora = None
+        if with_lightning_lora:
+            SDXL_Lightning_Lora = load_lora_model(SDXL_BaseModel)
+            base_prompt_input = cliptextencode.encode(
+                text=prompt,
+                clip=get_value_at_index(SDXL_Lightning_Lora, 1),
+            )
 
-        cliptextencode_23 = cliptextencode.encode(
-            text=negative_prompt,
-            clip=get_value_at_index(SDXL_Lightning_Lora, 1),
-        )
+            base_negative_prompt_input = cliptextencode.encode(
+                text=negative_prompt,
+                clip=get_value_at_index(SDXL_Lightning_Lora, 1),
+            )
+        else:
+            base_prompt_input = cliptextencode.encode(
+                text=prompt,
+                clip=get_value_at_index(SDXL_BaseModel, 1),
+            )
+
+            base_negative_prompt_input = cliptextencode.encode(
+                text=negative_prompt,
+                clip=get_value_at_index(SDXL_BaseModel, 1),
+            )
+
 
         SDXL_Refiner_v10 = load_refiner()
 
@@ -133,21 +139,21 @@ def generate_image(
             sampler_name="euler",
             scheduler="sgm_uniform",
             denoise=1,
-            model=get_value_at_index(SDXL_Lightning_Lora, 0),
-            positive=get_value_at_index(cliptextencode_22, 0),
-            negative=get_value_at_index(cliptextencode_23, 0),
+            model=get_value_at_index(SDXL_Lightning_Lora if with_lightning_lora else SDXL_BaseModel, 0),
+            positive=get_value_at_index(base_prompt_input, 0),
+            negative=get_value_at_index(base_negative_prompt_input, 0),
             latent_image=get_value_at_index(emptylatentimage_5, 0),
         )
 
         vaedecode = VAEDecode()
-        vaedecode_78 = vaedecode.decode(
+        base_output = vaedecode.decode(
             samples=get_value_at_index(ksampler_3, 0),
             vae=get_value_at_index(SDXL_BaseModel, 2),
         )
 
         vaeencode = VAEEncode()
         vaeencode_80 = vaeencode.encode(
-            pixels=get_value_at_index(vaedecode_78, 0),
+            pixels=get_value_at_index(base_output, 0),
             vae=get_value_at_index(SDXL_BaseModel, 2),
         )
 
@@ -178,6 +184,6 @@ def generate_image(
 
 
 if __name__ == "__main__":
-    output_images = generate_image()
+    output_images = generate_image(prompt=DEFAULT_PROMPT)
     saveImage = SaveImage()
     saveImage.save_images(images=output_images, filename_prefix="Test_Inference")
