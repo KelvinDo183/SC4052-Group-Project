@@ -11,7 +11,7 @@ st.set_page_config(layout="wide")
 db_manager = DatabaseManager()
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-DEFAULT_PROMPT = "(1girl:2),(beautiful eyes:1.2),beautiful girl,(hands in pocket:2),red hat,hoodie,computer"
+DEFAULT_PROMPT = "(1girl:2),(beautiful eyes:1.2),beautiful girl,red hat,hoodie"
 DEFAULT_NEGATIVE_PROMPT = "(bad hands:5),(fused fingers:5),(bad arms:4),(deformities:1.3),(extra limbs:2),(extra arms:2),(disfigured:2)"
 
 
