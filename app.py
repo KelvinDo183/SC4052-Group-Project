@@ -69,7 +69,7 @@ def profile_page():
         st.write("This user doesn't have any generated images.")
         return
 
-    num_columns = 5
+    num_columns = 4
     images_to_delete = []
     images_per_row = len(user_images) // num_columns + 1
     for i in range(images_per_row):
@@ -86,8 +86,15 @@ def profile_page():
                         images_to_delete.append(image[0])
                 col[j].image(
                     image[-1],
-                    caption=f"Model: {image[2]}, Prompt: {literal_eval(image[3])['prompt']}",
                 )
+                col[j].markdown(
+                    f"**_Model:_** {image[2]}<br>**_Seed:_** {literal_eval(image[3])['seed']}<br>**_Prompt:_** {literal_eval(image[3])['prompt']}",
+                    unsafe_allow_html=True
+                )
+                # col[j].image(
+                #     image[-1],
+                #     caption=f"Model: {image[2]},\tSeed: {literal_eval(image[3])['seed']},\tPrompt: {literal_eval(image[3])['prompt']}",
+                # )
 
     if st.button("Delete Images") and images_to_delete:
         db_manager.delete_images(images_to_delete)
