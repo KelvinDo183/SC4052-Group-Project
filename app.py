@@ -22,12 +22,9 @@ def login():
     if st.button("Login"):
         authenticated, user_id, username = db_manager.authenticate(username, password)
         if authenticated:
+            st.session_state.username = username
             st.session_state.logged_in = True
             st.session_state.user_id = user_id
-            st.session_state.username = username
-            st.query_params.logged_in = True
-            st.query_params.user_id = user_id
-            st.query_params.username = username
             st.rerun()
         else:
             st.error("Invalid username or password. Please try again.")
@@ -98,7 +95,7 @@ def profile_page():
 
     if st.button("Delete Images") and images_to_delete:
         db_manager.delete_images(images_to_delete)
-        st.experimental_rerun()
+        st.rerun()
 
 
 def query_inference_endpoint(**kwargs):
@@ -159,7 +156,7 @@ def generate_page():
                 label="Batch Size", value=3, min_value=1, max_value=9
             )
         with col4:
-            model_kwargs["seed"] = st.number_input(label="Seed", value=69420)
+            model_kwargs["seed"] = st.number_input(label="Seed", value=4052)
 
     if st.button("Generate images"):
         with st.spinner("Generating image..."):
@@ -194,18 +191,15 @@ def generate_page():
 
 
 def main():
-    query_params = st.query_params
-    logged_in = query_params.get("logged_in", False)
-    user_id = query_params.get("user_id", None)
-    username = query_params.get("username", None)
+    session = st.session_state
+    logged_in = st.session_state.get("logged_in", False)
+    user_id = st.session_state.get("user_id", None)
+    username = st.session_state.get("username", None)
 
-    st.session_state.logged_in = False
     if logged_in and user_id and username:
         st.session_state.logged_in = True
         st.session_state.user_id = int(user_id)
         st.session_state.username = username
-
-    if st.session_state.logged_in:
         st.sidebar.write(f"Welcome, {st.session_state.username}! ✨")
         page = st.sidebar.radio(
             "What would you like to do today?", ["Generate Image", "View Profile"]
