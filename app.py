@@ -2,6 +2,7 @@ from ast import literal_eval
 from io import BytesIO
 
 import streamlit as st
+import io
 import torch
 from database import DatabaseManager
 import requests
@@ -84,9 +85,30 @@ def profile_page():
                 col[j].image(
                     image[-1],
                 )
+                step_str = (
+                    f"**_Steps:_** Base ({literal_eval(image[3])['base_step']}) | Refiner ({literal_eval(image[3])['refiner_step']})<br>"
+                    if "base_step" in literal_eval(image[3]).keys()
+                    else ""
+                )
+                cfg_str = (
+                    f"**_Guidance scale:_** {literal_eval(image[3])['cfg']}<br>"
+                    if "cfg" in literal_eval(image[3]).keys()
+                    else ""
+                )
+                img2img_str = (
+                    f"**_Image to Image mode_**<br>"
+                    if step_str == "" and cfg_str == ""
+                    else ""
+                )
                 col[j].markdown(
-                    f"**_Model:_** {image[2]}<br>**_Seed:_** {literal_eval(image[3])['seed']}<br>**_Prompt:_** {literal_eval(image[3])['prompt']}",
-                    unsafe_allow_html=True
+                    f"**_Model:_** {image[2]}<br>\
+                    {step_str}\
+                    {cfg_str}\
+                    {img2img_str}\
+                    **_Seed:_** {literal_eval(image[3])['seed']}<br>\
+                    **_Prompt:_** {literal_eval(image[3])['prompt']}\
+                    ",
+                    unsafe_allow_html=True,
                 )
                 # col[j].image(
                 #     image[-1],
@@ -98,8 +120,8 @@ def profile_page():
         st.rerun()
 
 
-def query_inference_endpoint(**kwargs):
-    url = "http://localhost:5000/inference"
+def request_text2image(**kwargs):
+    url = "http://localhost:5000/text2img"
     payload = {
         "prompt": kwargs.get("prompt"),
         "negative_prompt": kwargs.get("negative_prompt"),
@@ -108,6 +130,9 @@ def query_inference_endpoint(**kwargs):
         "height": kwargs.get("height"),
         "seed": kwargs.get("seed"),
         "mode": kwargs.get("mode"),
+        "base_step": kwargs.get("base_step"),
+        "refiner_step": kwargs.get("refiner_step"),
+        "cfg": kwargs.get("cfg"),
     }
     headers = {"Content-Type": "application/json"}
 
@@ -128,6 +153,42 @@ def query_inference_endpoint(**kwargs):
         return None
 
 
+def request_image2image(**kwargs):
+    url = "http://localhost:5000/img2img"
+    payload = {
+        "prompt": kwargs.get("prompt"),
+        "negative_prompt": kwargs.get("negative_prompt", ""),
+        "seed": kwargs.get("seed"),
+        "mode": kwargs.get("mode"),
+    }
+    headers = {"Content-Type": "application/octet-stream"}
+    response = requests.post(
+        url, data=kwargs.get("image"), headers=headers, params=payload
+    )
+
+    if response.status_code == 200:
+        image_bytes_stream = response.content
+        delimiter = b"--DELIMITER--"
+        image_bytes_list = image_bytes_stream.split(delimiter)
+        images = []
+        for image_bytes in image_bytes_list:
+            if image_bytes:
+                image = Image.open(BytesIO(image_bytes))
+                images.append(image)
+        return images
+    else:
+        st.error(f"Error: {response.status_code} {response.text}")
+        return None
+
+
+# Specify the path to the default image file
+default_image_path = "images/demo.jpg"
+
+# Read the default image file as bytes
+with open(default_image_path, "rb") as file:
+    default_image_bytes = file.read()
+
+
 def generate_page():
     st.subheader("Generate and Save Image 👨‍🎨")
     model_kwargs = {
@@ -146,52 +207,92 @@ def generate_page():
             placeholder=DEFAULT_NEGATIVE_PROMPT,
             help="Features you want to exclude from the image",
         )
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            model_kwargs["width"] = st.number_input(label="Width", value=1024)
-        with col2:
-            model_kwargs["height"] = st.number_input(label="Height", value=1024)
-        with col3:
-            model_kwargs["batch_size"] = st.number_input(
-                label="Batch Size", value=3, min_value=1, max_value=9
-            )
-        with col4:
-            model_kwargs["seed"] = st.number_input(label="Seed", value=4052)
+        # Create a file uploader widget with the default value
+        uploaded_file = st.file_uploader(
+            "Use Image to Image (img2img) workflow",
+            type=["jpg", "jpeg", "png"],
+            help="Refine your source image with additional styles. Recommend to use with minimal prompts.",
+        )
+        # Read the uploaded file as bytes
+        if uploaded_file:
+            file_bytes = uploaded_file.read()
+            image = Image.open(io.BytesIO(file_bytes))
+
+            # Display the uploaded image
+            st.image(file_bytes, caption="Source Image", width=min(image.width, 500))
+
+            model_kwargs["image"] = file_bytes
+
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.number_input(label="Width", value=image.width, disabled=True)
+            with col2:
+                st.number_input(label="Height", value=image.height, disabled=True)
+            with col3:
+                model_kwargs["seed"] = st.number_input(label="Seed", value=4052)
+
+        else:
+            col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
+            with col1:
+                model_kwargs["width"] = st.number_input(label="Width", value=1024)
+            with col2:
+                model_kwargs["height"] = st.number_input(label="Height", value=1024)
+            with col3:
+                model_kwargs["batch_size"] = st.number_input(
+                    label="Batch Size", value=3, min_value=1, max_value=9
+                )
+            with col4:
+                model_kwargs["seed"] = st.number_input(label="Seed", value=4052)
+            with col5:
+                model_kwargs["base_step"] = st.number_input(
+                    label="Base Step", value=8, help="Steps on base model"
+                )
+            with col6:
+                model_kwargs["refiner_step"] = st.number_input(
+                    label="Refiner Step", value=1, help="Steps on refiner (if any)"
+                )
+            with col7:
+                model_kwargs["cfg"] = st.number_input(
+                    label="Guidance Scale",
+                    value=1.0,
+                    help="How strict model should follows prompt (DEFAULT IS NORMALLY THE BEST)",
+                )
 
     if st.button("Generate images"):
         with st.spinner("Generating image..."):
-            output_images = query_inference_endpoint(**model_kwargs)
+            if uploaded_file:
+                output_images = request_image2image(**model_kwargs)
+                pass
+            else:
+                output_images = request_text2image(**model_kwargs)
+
         if not output_images:
             return
         st.success("Done!")
 
         num_images = len(output_images)
-        num_cols = min(num_images, 3)
+        num_cols = max(2, min(num_images, 4))
         cols = st.columns(num_cols)
 
-        # TODO: improve images layout based on width and height settings
-        max_width = int(model_kwargs["width"])
         for i, image in enumerate(output_images):
             with cols[i % num_cols]:
                 st.image(
                     image,
-                    width=max_width,
                     caption=f"Image {i+1}",
-                    use_column_width=True,
                 )
                 img_data = BytesIO()
                 image.save(img_data, format="PNG")
                 img_data.seek(0)
-                db_manager.insert_image(
-                    st.session_state.user_id,
-                    f"{model_kwargs['mode']}",
-                    model_kwargs,
-                    img_data.read(),
-                )
+                if not uploaded_file:
+                    db_manager.insert_image(
+                        st.session_state.user_id,
+                        f"{model_kwargs['mode']}",
+                        {k: v for k, v in model_kwargs.items() if k != "image"},
+                        img_data.read(),
+                    )
 
 
 def main():
-    session = st.session_state
     logged_in = st.session_state.get("logged_in", False)
     user_id = st.session_state.get("user_id", None)
     username = st.session_state.get("username", None)
