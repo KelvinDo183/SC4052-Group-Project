@@ -4,6 +4,7 @@ from functools import lru_cache
 from inference import generate_image, image2image
 from PIL import Image
 import numpy as np
+import argparse
 
 app = FastAPI()
 
@@ -124,7 +125,21 @@ async def img2img(
 
     return Response(content=image_bytes_stream, media_type="application/octet-stream")
 
+
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=5000)
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-D", "--debug", action="store_true", help="Run the server in debug mode"
+    )
+    args = parser.parse_args()
+
+    if args.debug:
+        # Run in debug mode with reloading and detailed logging
+        uvicorn.run(
+            "__main__:app", host="0.0.0.0", port=5000, reload=True, log_level="debug"
+        )
+    else:
+        # Run in production mode
+        uvicorn.run("__main__:app", host="0.0.0.0", port=5000)
