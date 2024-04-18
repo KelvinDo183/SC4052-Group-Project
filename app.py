@@ -43,7 +43,12 @@ def create_account_page():
                 st.error(error)
                 return
             st.success("Account created successfully!")
-            st.write("You can now login with your new account.")
+            authenticated, user_id, username = db_manager.authenticate(new_username, new_password)
+            if authenticated:
+                st.session_state.username = username
+                st.session_state.logged_in = True
+                st.session_state.user_id = user_id
+                st.rerun()
         else:
             st.error("Username and password cannot be empty.")
 
