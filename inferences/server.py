@@ -79,16 +79,6 @@ async def text2img(request: Request):
     return Response(content=image_bytes_stream, media_type="application/octet-stream")
 
 
-def cached_img2img(prompt, image, negative_prompt, mode, seed):
-    return image2image(
-        prompt,
-        image,
-        negative_prompt,
-        mode,
-        seed,
-    )
-
-
 @app.post("/img2img")
 async def img2img(
     request: Request,
@@ -96,6 +86,7 @@ async def img2img(
     negative_prompt: str = Query(...),
     seed: int = Query(...),
     mode: str = Query(...),
+    denoise: float = Query(...)
 ):
     # Read the raw bytes from the request body
     image_bytes = await request.body()
@@ -104,12 +95,13 @@ async def img2img(
     image = Image.open(io.BytesIO(image_bytes))
 
     # NOTE: list of numpy tensors
-    output_images = cached_img2img(
+    output_images = image2image(
         prompt,
         image,
         negative_prompt,
         mode,
         seed,
+        denoise
     )
 
     # Convert the images to bytes and join them with a delimiter

@@ -13,9 +13,10 @@ from nodes import (
     CLIPTextEncode,
     EmptyLatentImage,
     LoraLoader,
+    LoraLoaderModelOnly,
     ImageScale,
-    NODE_CLASS_MAPPINGS,
     SaveImage,
+    LoadImage
 )
 
 
@@ -51,6 +52,7 @@ base_checkpoints = {
 }
 
 loraloader = LoraLoader()
+loraloadermodel = LoraLoaderModelOnly()
 
 
 @lru_cache(maxsize=1)
@@ -77,6 +79,15 @@ def load_lora_model(base_model):
     )
 
 
+@lru_cache(maxsize=1)
+def load_lora_model_only(base_model):
+    return loraloadermodel.load_lora_model_only(
+        lora_name="sdxl_lightning_8step_lora.safetensors",
+        strength_model=1,
+        model=get_value_at_index(base_model, 0),
+    )
+
+
 DEFAULT_PROMPT = "(1girl:2),(beautiful eyes:1.2),beautiful girl,(hands in pocket:2),red hat,hoodie,computer"
 DEFAULT_NEGATIVE_PROMPT = "(bad hands:5),(fused fingers:5),(bad arms:4),(deformities:1.3),(extra limbs:2),(extra arms:2),(disfigured:2)"
 
@@ -88,7 +99,7 @@ def generate_image(
     batch_size=4,
     width=1024,
     height=1024,
-    seed=420,
+    seed=4052,
     base_step=8,
     refiner_step=1,
     cfg=1,
@@ -104,24 +115,16 @@ def generate_image(
         with_lightning_lora = mode != "realistic"
         SDXL_Lightning_Lora = None
         if with_lightning_lora:
-            SDXL_Lightning_Lora = load_lora_model(SDXL_BaseModel)
-            base_prompt_input = cliptextencode.encode(
-                text=prompt,
-                clip=get_value_at_index(SDXL_Lightning_Lora, 1),
-            )
-            base_negative_prompt_input = cliptextencode.encode(
-                text=negative_prompt,
-                clip=get_value_at_index(SDXL_Lightning_Lora, 1),
-            )
-        else:
-            base_prompt_input = cliptextencode.encode(
-                text=prompt,
-                clip=get_value_at_index(SDXL_BaseModel, 1),
-            )
-            base_negative_prompt_input = cliptextencode.encode(
-                text=negative_prompt,
-                clip=get_value_at_index(SDXL_BaseModel, 1),
-            )
+            SDXL_Lightning_Lora = load_lora_model_only(SDXL_BaseModel)
+
+        base_prompt = cliptextencode.encode(
+            text=prompt,
+            clip=get_value_at_index(SDXL_BaseModel, 1),
+        )
+        base_negativve_prompt = cliptextencode.encode(
+            text=negative_prompt,
+            clip=get_value_at_index(SDXL_BaseModel, 1),
+        )
 
         ksampler = KSampler()
         ksampler_3 = ksampler.sample(
@@ -132,10 +135,15 @@ def generate_image(
             scheduler="sgm_uniform",
             denoise=1,
             model=get_value_at_index(
-                SDXL_Lightning_Lora if with_lightning_lora else SDXL_BaseModel, 0
+                (
+                    SDXL_Lightning_Lora
+                    if SDXL_Lightning_Lora is not None
+                    else SDXL_BaseModel
+                ),
+                0,
             ),
-            positive=get_value_at_index(base_prompt_input, 0),
-            negative=get_value_at_index(base_negative_prompt_input, 0),
+            positive=get_value_at_index(base_prompt, 0),
+            negative=get_value_at_index(base_negativve_prompt, 0),
             latent_image=get_value_at_index(emptylatentimage_5, 0),
         )
 
@@ -222,39 +230,39 @@ def image2image(
     image: Image.Image,
     negative_prompt=DEFAULT_NEGATIVE_PROMPT,
     mode: Union[Literal["anime"], Literal["realistic"], Literal["cartoon"]] = "anime",
-    seed=420,
+    seed=4052,
+    denoise=0.7
 ):
     with torch.inference_mode():
-
+        print("Input", prompt, negative_prompt, mode, seed)
         SDXL_BaseModel = load_base_model(mode)
-
-        cliptextencode = CLIPTextEncode()
         with_lightning_lora = mode != "realistic"
         SDXL_Lightning_Lora = None
         if with_lightning_lora:
-            SDXL_Lightning_Lora = load_lora_model(SDXL_BaseModel)
-            base_prompt_input = cliptextencode.encode(
-                text=prompt,
-                clip=get_value_at_index(SDXL_Lightning_Lora, 1),
-            )
-            base_negative_prompt_input = cliptextencode.encode(
-                text=negative_prompt,
-                clip=get_value_at_index(SDXL_Lightning_Lora, 1),
-            )
-        else:
-            base_prompt_input = cliptextencode.encode(
-                text=prompt,
-                clip=get_value_at_index(SDXL_BaseModel, 1),
-            )
-            base_negative_prompt_input = cliptextencode.encode(
-                text=negative_prompt,
-                clip=get_value_at_index(SDXL_BaseModel, 1),
-            )
+            SDXL_Lightning_Lora = load_lora_model_only(SDXL_BaseModel)
+
+        SDXL_Refiner_v10 = load_refiner()
+        cliptextencode = CLIPTextEncode()
+        base_prompt = cliptextencode.encode(
+            text=prompt,
+            clip=get_value_at_index(SDXL_BaseModel, 1),
+        )
+        base_negative_prompt = cliptextencode.encode(
+            text=negative_prompt,
+            clip=get_value_at_index(SDXL_BaseModel, 1),
+        )
+        refiner_prompt = cliptextencode.encode(
+            text=prompt, clip=get_value_at_index(SDXL_Refiner_v10, 1)
+        )
+
+        refiner_negative_prompt = cliptextencode.encode(
+            text=negative_prompt, clip=get_value_at_index(SDXL_Refiner_v10, 1)
+        )
 
         input_image = load_image(image)
 
         imagescale = ImageScale()
-        imagescale_49 = imagescale.upscale(
+        lanczos_interpolated_image = imagescale.upscale(
             upscale_method="lanczos",
             width=image.width,
             height=image.height,
@@ -264,38 +272,35 @@ def image2image(
 
         vaeencode = VAEEncode()
         vaeencode_52 = vaeencode.encode(
-            pixels=get_value_at_index(imagescale_49, 0),
+            pixels=get_value_at_index(lanczos_interpolated_image, 0),
             vae=get_value_at_index(SDXL_BaseModel, 2),
         )
 
         ksampler = KSampler()
+        ksampleradvanced = KSamplerAdvanced()
         vaedecode = VAEDecode()
+        saveImage = SaveImage()
 
-        base_latent_output = ksampler.sample(
+        base_output = ksampler.sample(
             seed=seed,
             steps=8,
             cfg=1,
             sampler_name="euler",
             scheduler="sgm_uniform",
-            denoise=0.5,
+            denoise=denoise,
             model=get_value_at_index(
-                SDXL_Lightning_Lora if with_lightning_lora else SDXL_BaseModel, 0
+                (
+                    SDXL_Lightning_Lora
+                    if SDXL_Lightning_Lora is not None
+                    else SDXL_BaseModel
+                ),
+                0,
             ),
-            positive=get_value_at_index(base_prompt_input, 0),
-            negative=get_value_at_index(base_negative_prompt_input, 0),
+            positive=get_value_at_index(base_prompt, 0),
+            negative=get_value_at_index(base_negative_prompt, 0),
             latent_image=get_value_at_index(vaeencode_52, 0),
         )
 
-        SDXL_Refiner_v10 = load_refiner()
-        refiner_prompt = cliptextencode.encode(
-            text=prompt, clip=get_value_at_index(SDXL_Refiner_v10, 1)
-        )
-
-        refiner_negative_prompt = cliptextencode.encode(
-            text=negative_prompt, clip=get_value_at_index(SDXL_Refiner_v10, 1)
-        )
-
-        ksampleradvanced = KSamplerAdvanced()
         refiner_output = ksampleradvanced.sample(
             add_noise="disable",
             noise_seed=seed,
@@ -309,15 +314,16 @@ def image2image(
             model=get_value_at_index(SDXL_Refiner_v10, 0),
             positive=get_value_at_index(refiner_prompt, 0),
             negative=get_value_at_index(refiner_negative_prompt, 0),
-            latent_image=get_value_at_index(base_latent_output, 0),
+            latent_image=get_value_at_index(base_output, 0),
         )
 
-        vaedecode_8 = vaedecode.decode(
+        decoded_output_image = vaedecode.decode(
             samples=get_value_at_index(refiner_output, 0),
             vae=get_value_at_index(SDXL_Refiner_v10, 2),
         )
 
-        output_images = get_value_at_index(vaedecode_8, 0)
+        output_images = get_value_at_index(decoded_output_image, 0)
+        saveImage.save_images(images=output_images, filename_prefix="Test_Inference")
         return output_images
 
 

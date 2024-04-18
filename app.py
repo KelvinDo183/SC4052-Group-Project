@@ -160,6 +160,7 @@ def request_image2image(**kwargs):
         "negative_prompt": kwargs.get("negative_prompt", ""),
         "seed": kwargs.get("seed"),
         "mode": kwargs.get("mode"),
+        "denoise": kwargs.get("denoise"),
     }
     headers = {"Content-Type": "application/octet-stream"}
     response = requests.post(
@@ -223,13 +224,19 @@ def generate_page():
 
             model_kwargs["image"] = file_bytes
 
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             with col1:
                 st.number_input(label="Width", value=image.width, disabled=True)
             with col2:
                 st.number_input(label="Height", value=image.height, disabled=True)
             with col3:
                 model_kwargs["seed"] = st.number_input(label="Seed", value=4052)
+            with col4:
+                model_kwargs["denoise"] = st.slider(
+                    label="Denoise",
+                    value=0.75,
+                    help="The strength of noise introduced in image generation process. Higher values allow for more creativity",
+                )
 
         else:
             col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
