@@ -279,7 +279,6 @@ def image2image(
         ksampler = KSampler()
         ksampleradvanced = KSamplerAdvanced()
         vaedecode = VAEDecode()
-        saveImage = SaveImage()
 
         base_output = ksampler.sample(
             seed=seed,
@@ -323,7 +322,6 @@ def image2image(
         )
 
         output_images = get_value_at_index(decoded_output_image, 0)
-        saveImage.save_images(images=output_images, filename_prefix="Test_Inference")
         return output_images
 
 
