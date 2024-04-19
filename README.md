@@ -1,8 +1,8 @@
 # Wifu Creator
 ## Ready to design your dream waifu? Dive into our Waifu Creator! This intuitive app empowers you to craft your unique waifu with endless possibilities. Start creating now!
-<img width="1180" alt="methodology" src="https://th.bing.com/th/id/OIP.PgYeWuom0-xflkachWRk0gHaEK?rs=1&pid=ImgDetMain">
+<img width="1024" alt="example_generated_image" src="./inferences/output/example.png">
 
-## Our app offers a wide array of model options, providing users with numerous possibilities to craft their ideal waifu. Dive into the creative process with endless variations at your fingertips. Follow the instructions below to embark on your world of wifu!
+## Our app offers a wide array of model options, providing users with numerous possibilities to craft their ideal waifu. Dive into the creative process with endless variations at your fingertips. Follow the instructions below to embark on your journey!
 ## Set up waifuwu with local comfy
 
 0. install requirements.txt. Set up cuda according to local machine
