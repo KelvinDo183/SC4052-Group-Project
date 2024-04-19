@@ -112,9 +112,9 @@ def generate_image(
         )
 
         cliptextencode = CLIPTextEncode()
-        with_lightning_lora = mode != "realistic"
+        is_lightning_base = mode != "realistic"
         SDXL_Lightning_Lora = None
-        if with_lightning_lora:
+        if is_lightning_base:
             SDXL_Lightning_Lora = load_lora_model_only(SDXL_BaseModel)
 
         base_prompt = cliptextencode.encode(
@@ -131,8 +131,8 @@ def generate_image(
             seed=seed,
             steps=base_step,
             cfg=cfg,
-            sampler_name="euler",
-            scheduler="sgm_uniform",
+            sampler_name="euler" if is_lightning_base else "dpmpp_sde",
+            scheduler="sgm_uniform" if is_lightning_base else "karras",
             denoise=1,
             model=get_value_at_index(
                 (
@@ -177,8 +177,8 @@ def generate_image(
             noise_seed=seed,
             steps=base_step + refiner_step,
             cfg=cfg,
-            sampler_name="euler",
-            scheduler="sgm_uniform",
+            sampler_name="euler" if is_lightning_base else "dpmpp_sde",
+            scheduler="sgm_uniform" if is_lightning_base else "karras",
             start_at_step=base_step,
             end_at_step=10000,
             return_with_leftover_noise="disable",
@@ -236,9 +236,9 @@ def image2image(
     with torch.inference_mode():
         print("Input", prompt, negative_prompt, mode, seed)
         SDXL_BaseModel = load_base_model(mode)
-        with_lightning_lora = mode != "realistic"
+        is_lightning_base = mode != "realistic"
         SDXL_Lightning_Lora = None
-        if with_lightning_lora:
+        if is_lightning_base:
             SDXL_Lightning_Lora = load_lora_model_only(SDXL_BaseModel)
 
         SDXL_Refiner_v10 = load_refiner()
@@ -284,8 +284,8 @@ def image2image(
             seed=seed,
             steps=8,
             cfg=1,
-            sampler_name="euler",
-            scheduler="sgm_uniform",
+            sampler_name="euler" if is_lightning_base else "dpmpp_sde",
+            scheduler="sgm_uniform" if is_lightning_base else "karras",
             denoise=denoise,
             model=get_value_at_index(
                 (
@@ -305,8 +305,8 @@ def image2image(
             noise_seed=seed,
             steps=9,
             cfg=2,
-            sampler_name="euler",
-            scheduler="sgm_uniform",
+            sampler_name="euler" if is_lightning_base else "dpmpp_sde",
+            scheduler="sgm_uniform" if is_lightning_base else "karras",
             start_at_step=8,
             end_at_step=10000,
             return_with_leftover_noise="disable",
