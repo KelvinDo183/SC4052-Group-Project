@@ -1,9 +1,14 @@
 import json
 import sqlite3
+import os
 
 
 class DatabaseManager:
     def __init__(self, users_db_path='data/users.db', images_db_path='data/images.db'):
+        # Create the 'data' directory if it doesn't exist
+        os.makedirs(os.path.dirname(users_db_path), exist_ok=True)
+        os.makedirs(os.path.dirname(images_db_path), exist_ok=True)
+
         self.conn_users = sqlite3.connect(users_db_path)
         self.conn_images = sqlite3.connect(images_db_path)
         self.c_users = self.conn_users.cursor()
